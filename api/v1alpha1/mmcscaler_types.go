@@ -17,12 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
-
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // MMcScalerSpec defines the desired state of MMcScaler
 type MMcScalerSpec struct {
@@ -31,9 +29,42 @@ type MMcScalerSpec struct {
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	// foo is an example field of MMcScaler. Edit mmcscaler_types.go to remove/update
-	// +optional
-	Foo *string `json:"foo,omitempty"`
+	// Name of deployment to scale, must be in same namespace
+	// +kubebuilder:validation:Required
+	TargetRef corev1.LocalObjectReference `json:"targetRef"`
+
+	// +kubebuilder:validation:Minimum=1
+	MinReplicas int32 `json:"minReplicas"`
+	// +kubebuilder:validation:Minimum=1
+	MaxReplicas int32 `json:"maxReplicas"`
+
+	// this could drift from the env var setting workers in deployment - add validation inside controller code
+	// +kubebuilder:validation:Required
+	WorkersPerPod int32 `json:"workersPerPod"`
+
+	// target utilisation of workers per pod. milli-units: 800 = 0.80
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=1000
+	// +kubebuilder:default=700
+	TargetUtilizationMilli int32 `json:"targetUtilizationMilli"`
+
+	// T_d: desired backlog drain time once new capacity lands.
+	// +kubebuilder:validation:Required
+	DrainTime metav1.Duration `json:"drainTime"`
+
+	// +kubebuilder:validation:Required
+	RedisAddress string `json:"redisAddress"`
+
+	// Redis list key
+	// +kubebuilder:validation:Required
+	QueueKey string `json:"queueKey"`
+
+	// +kubebuilder:validation:Required
+	PrometheusAddress string `json:"prometheusAddress"`
+
+	// compute and record decisions without writing replicas
+	// +kubebuilder:default=false
+	DryRun bool `json:"dryRun,omitempty"`
 }
 
 // MMcScalerStatus defines the observed state of MMcScaler.
