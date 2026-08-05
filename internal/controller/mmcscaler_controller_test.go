@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	scalingv1alpha1 "github.com/will-m-0/queue-scaler/api/v1alpha1"
@@ -53,6 +55,22 @@ var _ = Describe("MMcScaler Controller", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: resourceNamespace,
+					},
+					Spec: scalingv1alpha1.MMcScalerSpec{
+						TargetRef: corev1.LocalObjectReference{
+							Name: "test-name",
+						},
+						MinReplicas:            1,
+						MaxReplicas:            10,
+						WorkersPerPod:          10,
+						TargetUtilizationMilli: 700,
+						DrainTime: metav1.Duration{
+							Duration: 30 * time.Second,
+						},
+						RedisAddress:      "Redis Address",
+						QueueKey:          "Queue Key",
+						PrometheusAddress: "Prometheus Address",
+						DryRun:            true,
 					},
 					// TODO(user): Specify other spec details if needed.
 				}
