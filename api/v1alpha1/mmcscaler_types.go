@@ -75,6 +75,15 @@ type MMcScalerStatus struct {
 	// For Kubernetes API conventions, see:
 	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
 
+	CurrentReplicas int32 `json:"currentReplicas"`
+	DesiredReplicas int32 `json:"desiredReplicas"`
+
+	ObservedQueueDepth       int32 `json:"observedQueueDepth"`
+	ObservedUtilizationMilli int32 `json:"observedUtilizationMilli"`
+
+	LastDecisionTime *metav1.Time `json:"lastDecisionTime"`
+	LastScaleTime    *metav1.Time `json:"lastScaleTime"`
+
 	// conditions represent the current state of the MMcScaler resource.
 	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
 	//
