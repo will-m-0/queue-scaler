@@ -8,4 +8,14 @@ layout:
 - go.kubebuilder.io/v4
 projectName: queue-scaler
 repo: github.com/will-m-0/queue-scaler
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: will-m-0.github.io
+  group: scaling
+  kind: MMcScaler
+  path: github.com/will-m-0/queue-scaler/api/v1alpha1
+  version: v1alpha1
 version: "3"
