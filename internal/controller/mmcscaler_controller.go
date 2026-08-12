@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,6 +44,7 @@ type MMcScalerReconciler struct {
 // +kubebuilder:rbac:groups=scaling.will-m-0.github.io,resources=mmcscalers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=scaling.will-m-0.github.io,resources=mmcscalers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=scaling.will-m-0.github.io,resources=mmcscalers/finalizers,verbs=update
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -83,24 +86,46 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// TOOD - check errors fromr redis and prom client creations
-
 	// redis client for reading queue length
 	// TODO - reuse same redis client across reconciliations
 	rdb := redis.NewClient(&redis.Options{
 		Addr: scaler.Spec.RedisAddress,
 	})
+	defer rdb.Close()
 
 	// prometheus client for reading job service length over window
 	promClient, err := promapi.NewClient(promapi.Config{
 		Address: scaler.Spec.PrometheusAddress,
 	})
+	if err != nil {
+		log.Error(err, "Error creating client")
+		return ctrl.Result{}, err
+	}
 	prom := promv1.NewAPI(promClient)
+	promctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+
+	result, warnings, err := prom.Query(promctx, "up", time.Now(), promv1.WithTimeout(3*time.Second))
+	if err != nil {
+		log.Error(err, "Received an error response from prometheus")
+		return ctrl.Result{}, err
+	}
+	for _, w := range warnings {
+		log.Info("Prometheus returned with warnings", "warning", w)
+	}
+	log.Info(fmt.Sprintf("Result: %v", result))
 
 	// read queue length from redis
-	queue_length := rdb.LLen(ctx, scaler.Spec.QueueKey)
+	queue_length, err := rdb.LLen(ctx, scaler.Spec.QueueKey).Result()
+	if err != nil {
+		log.Info("Failed to get queue length from redis", "returned error: ", err)
+		return ctrl.Result{}, err
+	}
+	log.Info("current redis qeueue length", "queue_length", queue_length)
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{
+		RequeueAfter: 1 * time.Minute,
+	}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
