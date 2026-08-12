@@ -91,7 +91,11 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	rdb := redis.NewClient(&redis.Options{
 		Addr: scaler.Spec.RedisAddress,
 	})
-	defer rdb.Close()
+	defer func() {
+		if err := rdb.Close(); err != nil {
+			log.Error(err, "failed to close redis client")
+		}
+	}()
 
 	// prometheus client for reading job service length over window
 	promClient, err := promapi.NewClient(promapi.Config{
