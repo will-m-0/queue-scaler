@@ -18,11 +18,19 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	promapi "github.com/prometheus/client_golang/api"
+	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	"github.com/redis/go-redis/v9"
 
 	scalingv1alpha1 "github.com/will-m-0/queue-scaler/api/v1alpha1"
 )
@@ -36,6 +44,7 @@ type MMcScalerReconciler struct {
 // +kubebuilder:rbac:groups=scaling.will-m-0.github.io,resources=mmcscalers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=scaling.will-m-0.github.io,resources=mmcscalers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=scaling.will-m-0.github.io,resources=mmcscalers/finalizers,verbs=update
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -47,11 +56,80 @@ type MMcScalerReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
 func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	var scaler scalingv1alpha1.MMcScaler
+	if err := r.Get(ctx, req.NamespacedName, &scaler); err != nil {
+		if apierrors.IsNotFound(err) {
+			// custom resource not found - normally either deleted or not created
+			log.Info("MMcScaler resource not found. Ignoring as either deleted or never created")
+			return ctrl.Result{}, nil
+		}
+		// Error reading object - requeue request
+		// request is requeued even though no field set on ctrl.Result{}, as err is not nil
+		log.Error(err, "Failed to get MMcScaler")
+		return ctrl.Result{}, err
+	}
 
-	return ctrl.Result{}, nil
+	// read fresh state
+	var deploy appsv1.Deployment
+	key := client.ObjectKey{
+		Namespace: scaler.Namespace,
+		Name:      scaler.Spec.TargetRef.Name,
+	}
+	if err := r.Get(ctx, key, &deploy); err != nil {
+		if apierrors.IsNotFound(err) {
+			// cannot find - wait for next reconciliation cycle
+			log.Info("target deployment not found", "name", key.Name)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	// redis client for reading queue length
+	// TODO - reuse same redis client across reconciliations
+	rdb := redis.NewClient(&redis.Options{
+		Addr: scaler.Spec.RedisAddress,
+	})
+	defer func() {
+		if err := rdb.Close(); err != nil {
+			log.Error(err, "failed to close redis client")
+		}
+	}()
+
+	// prometheus client for reading job service length over window
+	promClient, err := promapi.NewClient(promapi.Config{
+		Address: scaler.Spec.PrometheusAddress,
+	})
+	if err != nil {
+		log.Error(err, "Error creating client")
+		return ctrl.Result{}, err
+	}
+	prom := promv1.NewAPI(promClient)
+	promctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+
+	result, warnings, err := prom.Query(promctx, "up", time.Now(), promv1.WithTimeout(3*time.Second))
+	if err != nil {
+		log.Error(err, "Received an error response from prometheus")
+		return ctrl.Result{}, err
+	}
+	for _, w := range warnings {
+		log.Info("Prometheus returned with warnings", "warning", w)
+	}
+	log.Info(fmt.Sprintf("Result: %v", result))
+
+	// read queue length from redis
+	queue_length, err := rdb.LLen(ctx, scaler.Spec.QueueKey).Result()
+	if err != nil {
+		log.Info("Failed to get queue length from redis", "returned error: ", err)
+		return ctrl.Result{}, err
+	}
+	log.Info("current redis qeueue length", "queue_length", queue_length)
+
+	return ctrl.Result{
+		RequeueAfter: 1 * time.Minute,
+	}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
