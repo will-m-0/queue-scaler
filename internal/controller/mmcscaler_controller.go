@@ -30,6 +30,7 @@ import (
 
 	promapi "github.com/prometheus/client_golang/api"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	"github.com/prometheus/common/model"
 	"github.com/redis/go-redis/v9"
 
 	scalingv1alpha1 "github.com/will-m-0/queue-scaler/api/v1alpha1"
@@ -109,7 +110,14 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	promctx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
 
-	result, warnings, err := prom.Query(promctx, "up", time.Now(), promv1.WithTimeout(3*time.Second))
+	// TODO - deduplicate queries
+	const serviceTimeQuery = "sum(rate(load_target_job_service_seconds_sum[5m])) / sum(rate(load_target_job_service_seconds_count[5m]))"
+	result, warnings, err := prom.Query(
+		promctx,
+		serviceTimeQuery,
+		time.Now(),
+		promv1.WithTimeout(3*time.Second),
+	)
 	if err != nil {
 		log.Error(err, "Received an error response from prometheus")
 		return ctrl.Result{}, err
@@ -117,7 +125,35 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	for _, w := range warnings {
 		log.Info("Prometheus returned with warnings", "warning", w)
 	}
-	log.Info(fmt.Sprintf("Result: %v", result))
+	vecResult, ok := result.(model.Vector)
+	if !ok {
+		// got something which wasnt a vector in response
+	}
+	// currently mertic is unnamed - possible to name it?
+	avgServiceTime := float64(vecResult[0].Value) // safe cast, SampleValue is alias of float64
+	log.Info(fmt.Sprintf("Last 5 minute avg service time: %v", avgServiceTime))
+
+	const avgActiveWorkersQuery = "sum(rate(load_target_job_service_seconds_sum[5m]))"
+	result, warnings, err = prom.Query(
+		promctx,
+		avgActiveWorkersQuery,
+		time.Now(),
+		promv1.WithTimeout(3*time.Second),
+	)
+	if err != nil {
+		log.Error(err, "Received an error response from prometheus")
+		return ctrl.Result{}, err
+	}
+	for _, w := range warnings {
+		log.Info("Prometheus returned with warnings", "warning", w)
+	}
+	vecResult, ok = result.(model.Vector)
+	if !ok {
+		fmt.Printf("Result from active workers query was not a vectory. Type %v instead\n", result.Type().String())
+	}
+	// currently mertic is unnamed - possible to name it?
+	avgActiveWorkersTime := float64(vecResult[0].Value) // safe cast, SampleValue is alias of float64
+	log.Info(fmt.Sprintf("Last 5 minute avg active workers time: %v", avgActiveWorkersTime))
 
 	// read queue length from redis
 	queue_length, err := rdb.LLen(ctx, scaler.Spec.QueueKey).Result()
