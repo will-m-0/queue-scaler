@@ -127,7 +127,7 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	vecResult, ok := result.(model.Vector)
 	if !ok {
-		// got something which wasnt a vector in response
+		fmt.Printf("Result from service time query was not a vector. Type %v instead\n", result.Type().String())
 	}
 	// currently mertic is unnamed - possible to name it?
 	avgServiceTime := float64(vecResult[0].Value) // safe cast, SampleValue is alias of float64
@@ -149,7 +149,7 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	vecResult, ok = result.(model.Vector)
 	if !ok {
-		fmt.Printf("Result from active workers query was not a vectory. Type %v instead\n", result.Type().String())
+		fmt.Printf("Result from active workers query was not a vector. Type %v instead\n", result.Type().String())
 	}
 	// currently mertic is unnamed - possible to name it?
 	avgActiveWorkersTime := float64(vecResult[0].Value) // safe cast, SampleValue is alias of float64
