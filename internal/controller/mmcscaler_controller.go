@@ -28,12 +28,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	promapi "github.com/prometheus/client_golang/api"
-	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
-	"github.com/prometheus/common/model"
 	"github.com/redis/go-redis/v9"
 
 	scalingv1alpha1 "github.com/will-m-0/queue-scaler/api/v1alpha1"
+	"github.com/will-m-0/queue-scaler/internal/promq"
 )
 
 // MMcScalerReconciler reconciles a MMcScaler object
@@ -64,6 +62,8 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if apierrors.IsNotFound(err) {
 			// custom resource not found - normally either deleted or not created
 			log.Info("MMcScaler resource not found. Ignoring as either deleted or never created")
+
+			// not an error, but dont retry
 			return ctrl.Result{}, nil
 		}
 		// Error reading object - requeue request
@@ -98,61 +98,20 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}()
 
-	// prometheus client for reading job service length over window
-	promClient, err := promapi.NewClient(promapi.Config{
-		Address: scaler.Spec.PrometheusAddress,
-	})
+	promClient, err := promq.New(scaler.Spec.PrometheusAddress, 6*time.Second, log)
 	if err != nil {
-		log.Error(err, "Error creating client")
+		log.Error(err, "Failed to create prometheus client")
 		return ctrl.Result{}, err
 	}
-	prom := promv1.NewAPI(promClient)
-	promctx, cancel := context.WithTimeout(ctx, 6*time.Second)
-	defer cancel()
 
-	// TODO - deduplicate queries
 	const serviceTimeQuery = "sum(rate(load_target_job_service_seconds_sum[5m])) / sum(rate(load_target_job_service_seconds_count[5m]))"
-	result, warnings, err := prom.Query(
-		promctx,
-		serviceTimeQuery,
-		time.Now(),
-		promv1.WithTimeout(3*time.Second),
-	)
-	if err != nil {
-		log.Error(err, "Received an error response from prometheus")
-		return ctrl.Result{}, err
-	}
-	for _, w := range warnings {
-		log.Info("Prometheus returned with warnings", "warning", w)
-	}
-	vecResult, ok := result.(model.Vector)
-	if !ok {
-		fmt.Printf("Result from service time query was not a vector. Type %v instead\n", result.Type().String())
-	}
-	// currently mertic is unnamed - possible to name it?
-	avgServiceTime := float64(vecResult[0].Value) // safe cast, SampleValue is alias of float64
+	serviceTimeRes, err := promClient.QueryVector(ctx, serviceTimeQuery, time.Now())
+	avgServiceTime := float64(serviceTimeRes[0].Value) // safe cast, SampleValue is alias of float64
 	log.Info(fmt.Sprintf("Last 5 minute avg service time: %v", avgServiceTime))
 
 	const avgActiveWorkersQuery = "sum(rate(load_target_job_service_seconds_sum[5m]))"
-	result, warnings, err = prom.Query(
-		promctx,
-		avgActiveWorkersQuery,
-		time.Now(),
-		promv1.WithTimeout(3*time.Second),
-	)
-	if err != nil {
-		log.Error(err, "Received an error response from prometheus")
-		return ctrl.Result{}, err
-	}
-	for _, w := range warnings {
-		log.Info("Prometheus returned with warnings", "warning", w)
-	}
-	vecResult, ok = result.(model.Vector)
-	if !ok {
-		fmt.Printf("Result from active workers query was not a vector. Type %v instead\n", result.Type().String())
-	}
-	// currently mertic is unnamed - possible to name it?
-	avgActiveWorkersTime := float64(vecResult[0].Value) // safe cast, SampleValue is alias of float64
+	activeWorkersRes, err := promClient.QueryVector(ctx, avgActiveWorkersQuery, time.Now())
+	avgActiveWorkersTime := float64(activeWorkersRes[0].Value) // safe cast, SampleValue is alias of float64
 	log.Info(fmt.Sprintf("Last 5 minute avg active workers time: %v", avgActiveWorkersTime))
 
 	// read queue length from redis
