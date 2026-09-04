@@ -3,12 +3,11 @@ package promq
 import "errors"
 
 var (
-	// permanent failures - the query or config is wrong.
-	ErrBadAddress = errors.New("bad prometheus address")
-	ErrBadQuery   = errors.New("prometheus rejected query")
-	ErrBadResult  = errors.New("unexpected result type")
-
-	// transient failures - retry on the next reconcile.
+	ErrBadAddress      = errors.New("bad prometheus address")
+	ErrBadQuery        = errors.New("prometheus rejected query")
+	ErrBadResult       = errors.New("unexpected result type")
+	ErrBadResponse     = errors.New("malformed prometheus response")
 	ErrPromUnavailable = errors.New("prometheus unavailable")
+	ErrQueryTimeout    = errors.New("prometheus query execution timeout")
 	ErrNoData          = errors.New("query returned no samples")
 )

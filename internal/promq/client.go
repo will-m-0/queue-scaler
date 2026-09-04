@@ -37,23 +37,47 @@ func New(addr string, timeout time.Duration, logger logr.Logger) (*Client, error
 	return &client, nil
 }
 
+func classifyErr(err error) error {
+	var apiErr *promv1.Error
+	if !errors.As(err, &apiErr) {
+		return ErrPromUnavailable
+	}
+
+	switch apiErr.Type {
+	case promv1.ErrBadData, promv1.ErrExec, promv1.ErrClient: // 4xx
+		return ErrBadQuery
+
+	case promv1.ErrBadResponse:
+		return ErrBadResponse
+
+	case promv1.ErrTimeout: // 503
+		return ErrQueryTimeout
+
+	default: // ErrCancelled & ErrServer
+		return ErrPromUnavailable
+	}
+}
+
 func (c *Client) QueryVector(ctx context.Context, q string, ts time.Time) (model.Vector, error) {
 	var errClientTimeout = errors.New("prometheus client deadline exceeded")
 	promctx, cancel := context.WithTimeoutCause(ctx, c.timeout, errClientTimeout)
 	defer cancel()
 
-	// TODO - make prom timeout configurable
-	result, warnings, err := c.api.Query(promctx, q, ts, promv1.WithTimeout(3*time.Second))
+	result, warnings, err := c.api.Query(promctx, q, ts, promv1.WithTimeout(c.timeout+2*time.Second))
 
 	if err != nil {
-		// was error caused by context pulling plug?
+		// parnet context died - controller shutting down.
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("query %q: %w", q, context.Cause(ctx))
+		}
+
+		// promctx died? likely never received prom reply
 		if cause := context.Cause(promctx); cause != nil {
 			return nil, fmt.Errorf("query %q: %w: %w", q, ErrPromUnavailable, cause)
 		}
 
-		// TODO - handle ctx causing failue
-
-		// TODO - distinguish between transient and permanent prom error replies
+		// received an error reply from prometheus
+		return nil, fmt.Errorf("query %q: %w: %w", q, classifyErr(err), err)
 	}
 	for _, w := range warnings {
 		// Fail if return with warnings?
