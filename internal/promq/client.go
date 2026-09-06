@@ -22,6 +22,7 @@ func New(addr string, timeout time.Duration, logger logr.Logger) (*Client, error
 	if timeout <= 0 {
 		return nil, fmt.Errorf("timeout must be positive, got %v", timeout)
 	}
+	// TODO - resuse prom client across reconciliations
 	promClient, err := promapi.NewClient(promapi.Config{
 		Address: addr,
 	})

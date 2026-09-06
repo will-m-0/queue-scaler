@@ -65,6 +65,9 @@ type MMcScalerSpec struct {
 	// compute and record decisions without writing replicas
 	// +kubebuilder:default=false
 	DryRun bool `json:"dryRun,omitempty"`
+
+	// interval between reconciliations
+	ReconciliationPeriodMilli int32 `json:"reconciliationPeriodMilli"`
 }
 
 // MMcScalerStatus defines the observed state of MMcScaler.

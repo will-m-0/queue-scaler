@@ -27,6 +27,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/redis/go-redis/v9"
 
@@ -55,6 +56,7 @@ type MMcScalerReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
 func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	reconciliationStart := time.Now()
 	log := logf.FromContext(ctx)
 
 	var scaler scalingv1alpha1.MMcScaler
@@ -80,9 +82,12 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	if err := r.Get(ctx, key, &deploy); err != nil {
 		if apierrors.IsNotFound(err) {
-			// cannot find - wait for next reconciliation cycle
+			// cannot find deployment - wait for next reconciliation cycle
 			log.Info("target deployment not found", "name", key.Name)
-			return ctrl.Result{}, nil
+			timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriodMilli)*time.Millisecond - time.Since(reconciliationStart)
+			return ctrl.Result{
+				RequeueAfter: timeToNextTick,
+			}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -105,12 +110,33 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	const serviceTimeQuery = "sum(rate(load_target_job_service_seconds_sum[5m])) / sum(rate(load_target_job_service_seconds_count[5m]))"
-	serviceTimeRes, err := promClient.QueryVector(ctx, serviceTimeQuery, time.Now())
+	serviceTimeRes, err := promClient.QueryVector(ctx, serviceTimeQuery, reconciliationStart)
+	switch classifyObservation(err) {
+	// TODO - meta SetStatusConditions
+	case obsMisconfigured:
+		return ctrl.Result{}, reconcile.TerminalError(err)
+	case obsIncomplete:
+		timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriodMilli)*time.Millisecond - time.Since(reconciliationStart)
+		return ctrl.Result{
+			RequeueAfter: timeToNextTick,
+		}, nil
+	}
+
 	avgServiceTime := float64(serviceTimeRes[0].Value) // safe cast, SampleValue is alias of float64
 	log.Info(fmt.Sprintf("Last 5 minute avg service time: %v", avgServiceTime))
 
 	const avgActiveWorkersQuery = "sum(rate(load_target_job_service_seconds_sum[5m]))"
-	activeWorkersRes, err := promClient.QueryVector(ctx, avgActiveWorkersQuery, time.Now())
+	activeWorkersRes, err := promClient.QueryVector(ctx, avgActiveWorkersQuery, reconciliationStart)
+	switch classifyObservation(err) {
+	// TODO - meta SetStatusConditions
+	case obsMisconfigured:
+		return ctrl.Result{}, reconcile.TerminalError(err)
+	case obsIncomplete:
+		timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriodMilli)*time.Millisecond - time.Since(reconciliationStart)
+		return ctrl.Result{
+			RequeueAfter: timeToNextTick,
+		}, nil
+	}
 	avgActiveWorkersTime := float64(activeWorkersRes[0].Value) // safe cast, SampleValue is alias of float64
 	log.Info(fmt.Sprintf("Last 5 minute avg active workers time: %v", avgActiveWorkersTime))
 
@@ -122,8 +148,9 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	log.Info("current redis qeueue length", "queue_length", queue_length)
 
+	timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriodMilli)*time.Millisecond - time.Since(reconciliationStart)
 	return ctrl.Result{
-		RequeueAfter: 1 * time.Minute,
+		RequeueAfter: timeToNextTick,
 	}, nil
 }
 
