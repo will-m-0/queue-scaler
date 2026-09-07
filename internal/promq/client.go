@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -13,16 +14,18 @@ import (
 )
 
 type Client struct {
+	addr    string
 	api     promv1.API
 	timeout time.Duration
 	logger  logr.Logger
 }
 
+func (c *Client) Addr() string { return c.addr }
+
 func New(addr string, timeout time.Duration, logger logr.Logger) (*Client, error) {
 	if timeout <= 0 {
 		return nil, fmt.Errorf("timeout must be positive, got %v", timeout)
 	}
-	// TODO - resuse prom client across reconciliations
 	promClient, err := promapi.NewClient(promapi.Config{
 		Address: addr,
 	})
@@ -34,6 +37,7 @@ func New(addr string, timeout time.Duration, logger logr.Logger) (*Client, error
 		api:     promv1.NewAPI(promClient),
 		timeout: timeout,
 		logger:  logger,
+		addr:    addr,
 	}
 	return &client, nil
 }

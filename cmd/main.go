@@ -178,13 +178,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.MMcScalerReconciler{
+	r := &controller.MMcScalerReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if err := r.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "mmcscaler")
 		os.Exit(1)
 	}
+	defer func() {
+		if err := r.Close(); err != nil {
+			setupLog.Error(err, "closing redis client")
+		}
+	}()
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

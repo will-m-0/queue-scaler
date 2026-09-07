@@ -92,25 +92,34 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// redis client for reading queue length
-	// TODO - reuse same redis client across reconciliations
-	rdb := redis.NewClient(&redis.Options{
-		Addr: scaler.Spec.RedisAddress,
-	})
-	defer func() {
-		if err := rdb.Close(); err != nil {
-			log.Error(err, "failed to close redis client")
+	if r.redis == nil || scaler.Spec.RedisAddress != r.redis.Options().Addr {
+		if r.redis != nil {
+			log.Info("redis addr changed, client is stale",
+				"have", r.redis.Options().Addr, "want", scaler.Spec.RedisAddress)
+			if err := r.redis.Close(); err != nil {
+				log.Error(err, "closing stale redis client")
+			}
 		}
-	}()
+		r.redis = redis.NewClient(&redis.Options{Addr: scaler.Spec.RedisAddress})
+	}
 
-	promClient, err := promq.New(scaler.Spec.PrometheusAddress, 6*time.Second, log)
+	const promQueryTimeout = 6 * time.Second
+	if r.prom == nil || r.prom.Addr() != scaler.Spec.PrometheusAddress {
+		if r.prom != nil {
+			log.Info("prometheus address changed, client is stale",
+				"have", r.prom.Addr(), "want", scaler.Spec.PrometheusAddress)
+		}
+		promClient, err := promq.New(scaler.Spec.PrometheusAddress, promQueryTimeout, log)
 	if err != nil {
+			// if failed to make prom client, config issue so on point retrying
 		log.Error(err, "Failed to create prometheus client")
-		return ctrl.Result{}, err
+			return ctrl.Result{}, reconcile.TerminalError(fmt.Errorf("prometheus client: %w", err))
+		}
+		r.prom = promClient
 	}
 
 	const serviceTimeQuery = "sum(rate(load_target_job_service_seconds_sum[5m])) / sum(rate(load_target_job_service_seconds_count[5m]))"
-	serviceTimeRes, err := promClient.QueryVector(ctx, serviceTimeQuery, reconciliationStart)
+	avgServiceTime, err := r.prom.QueryScalar(ctx, serviceTimeQuery, reconciliationStart)
 	switch classifyObservation(err) {
 	// TODO - meta SetStatusConditions
 	case obsMisconfigured:
@@ -121,12 +130,10 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			RequeueAfter: timeToNextTick,
 		}, nil
 	}
-
-	avgServiceTime := float64(serviceTimeRes[0].Value) // safe cast, SampleValue is alias of float64
 	log.Info(fmt.Sprintf("Last 5 minute avg service time: %v", avgServiceTime))
 
 	const avgActiveWorkersQuery = "sum(rate(load_target_job_service_seconds_sum[5m]))"
-	activeWorkersRes, err := promClient.QueryVector(ctx, avgActiveWorkersQuery, reconciliationStart)
+	avgActiveWorkers, err := r.prom.QueryScalar(ctx, avgActiveWorkersQuery, reconciliationStart)
 	switch classifyObservation(err) {
 	// TODO - meta SetStatusConditions
 	case obsMisconfigured:
@@ -137,11 +144,10 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			RequeueAfter: timeToNextTick,
 		}, nil
 	}
-	avgActiveWorkersTime := float64(activeWorkersRes[0].Value) // safe cast, SampleValue is alias of float64
-	log.Info(fmt.Sprintf("Last 5 minute avg active workers time: %v", avgActiveWorkersTime))
+	log.Info(fmt.Sprintf("Last 5 minute avg active workers time: %v", avgActiveWorkers))
 
 	// read queue length from redis
-	queue_length, err := rdb.LLen(ctx, scaler.Spec.QueueKey).Result()
+	queue_length, err := r.redis.LLen(ctx, scaler.Spec.QueueKey).Result()
 	if err != nil {
 		log.Info("Failed to get queue length from redis", "returned error: ", err)
 		return ctrl.Result{}, err
@@ -152,6 +158,13 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{
 		RequeueAfter: timeToNextTick,
 	}, nil
+}
+
+func (r *MMcScalerReconciler) Close() error {
+	if r.redis != nil {
+		return r.redis.Close()
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
