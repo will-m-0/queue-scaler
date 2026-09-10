@@ -42,33 +42,31 @@ func New(addr string, timeout time.Duration, logger logr.Logger) (*Client, error
 	return &client, nil
 }
 
-func classifyErr(err error) error {
-	var apiErr *promv1.Error
-	if !errors.As(err, &apiErr) {
-		return ErrPromUnavailable
+func (c *Client) QueryScalar(ctx context.Context, q string, ts time.Time) (float64, error) {
+	vec, err := c.QueryVector(ctx, q, ts)
+	if err != nil {
+		return 0, err
 	}
-
-	switch apiErr.Type {
-	case promv1.ErrBadData, promv1.ErrExec, promv1.ErrClient: // 4xx
-		return ErrBadQuery
-
-	case promv1.ErrBadResponse:
-		return ErrBadResponse
-
-	case promv1.ErrTimeout: // 503
-		return ErrQueryTimeout
-
-	default: // ErrCancelled & ErrServer
-		return ErrPromUnavailable
+	if len(vec) != 1 {
+		return 0, fmt.Errorf("query: %q: %w: got %d samples, expected 1", q, ErrBadResult, len(vec))
 	}
+	val := float64(vec[0].Value)
+	if math.IsNaN(val) {
+		// 0 / 0
+		return 0, fmt.Errorf("query: %q: %w: got NaN", q, ErrNoData)
+	}
+	if math.IsInf(val, 0) {
+		return 0, fmt.Errorf("query: %q: %w: got infinite result to query", q, ErrBadResult)
+	}
+	return val, nil
 }
 
 func (c *Client) QueryVector(ctx context.Context, q string, ts time.Time) (model.Vector, error) {
 	var errClientTimeout = errors.New("prometheus client deadline exceeded")
-	promctx, cancel := context.WithTimeoutCause(ctx, c.timeout, errClientTimeout)
+	promctx, cancel := context.WithTimeoutCause(ctx, c.timeout+2*time.Second, errClientTimeout)
 	defer cancel()
 
-	result, warnings, err := c.api.Query(promctx, q, ts, promv1.WithTimeout(c.timeout+2*time.Second))
+	result, warnings, err := c.api.Query(promctx, q, ts, promv1.WithTimeout(c.timeout))
 
 	if err != nil {
 		// parnet context died - controller shutting down.
