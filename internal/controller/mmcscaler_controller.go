@@ -111,7 +111,7 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Info("prometheus address changed, client is stale",
 				"have", r.prom.Addr(), "want", scaler.Spec.PrometheusAddress)
 		}
-		promClient, err := promq.New(scaler.Spec.PrometheusAddress, promQueryTimeout, log)
+		promClient, err := promq.New(scaler.Spec.PrometheusAddress, promQueryTimeout)
 	if err != nil {
 			// if failed to make prom client, config issue so on point retrying
 		log.Error(err, "Failed to create prometheus client")

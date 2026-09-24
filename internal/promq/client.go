@@ -17,12 +17,11 @@ type Client struct {
 	addr    string
 	api     promv1.API
 	timeout time.Duration
-	logger  logr.Logger
 }
 
 func (c *Client) Addr() string { return c.addr }
 
-func New(addr string, timeout time.Duration, logger logr.Logger) (*Client, error) {
+func New(addr string, timeout time.Duration) (*Client, error) {
 	if timeout <= 0 {
 		return nil, fmt.Errorf("timeout must be positive, got %v", timeout)
 	}
@@ -36,7 +35,6 @@ func New(addr string, timeout time.Duration, logger logr.Logger) (*Client, error
 	var client = Client{
 		api:     promv1.NewAPI(promClient),
 		timeout: timeout,
-		logger:  logger,
 		addr:    addr,
 	}
 	return &client, nil
@@ -62,6 +60,7 @@ func (c *Client) QueryScalar(ctx context.Context, q string, ts time.Time) (float
 }
 
 func (c *Client) QueryVector(ctx context.Context, q string, ts time.Time) (model.Vector, error) {
+	logger := logr.FromContextOrDiscard(ctx)
 	var errClientTimeout = errors.New("prometheus client deadline exceeded")
 	promctx, cancel := context.WithTimeoutCause(ctx, c.timeout+2*time.Second, errClientTimeout)
 	defer cancel()
@@ -84,7 +83,7 @@ func (c *Client) QueryVector(ctx context.Context, q string, ts time.Time) (model
 	}
 	for _, w := range warnings {
 		// Fail if return with warnings?
-		c.logger.Info("Prometheus returned with warnings", "warning", w)
+		logger.Info("Prometheus returned with warnings", "warning", w)
 	}
 	vecResult, ok := result.(model.Vector)
 	if !ok {
