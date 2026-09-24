@@ -7,6 +7,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/will-m-0/queue-scaler/api/v1alpha1"
 	"github.com/will-m-0/queue-scaler/internal/promq"
 	"github.com/will-m-0/queue-scaler/internal/queue"
@@ -67,6 +68,8 @@ func (o *observer) observe(ctx context.Context, deploy appsv1.Deployment, ts tim
 	check("redis queue depth", err)
 
 	totalArrivals, err := o.queue.ArrivalsTotal(ctx)
+	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("redis total arrivals count", "count", totalArrivals)
 	check("redis total arrivals", err)
 
 	if len(errs) > 0 {

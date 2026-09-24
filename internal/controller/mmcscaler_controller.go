@@ -126,16 +126,18 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	case obsIncomplete:
 		// update status, and requeue without making scaling decision
 		timeToNextTick := scaler.Spec.ReconciliationPeriod.Duration - time.Since(reconciliationStart)
+		log.Error(err, "incomplete observation")
 		return ctrl.Result{
 			RequeueAfter: timeToNextTick,
 		}, nil
 	case obsMisconfigured:
 		// spec or image misconfigured, so reconcile will not succeed until image or spec change
+		log.Error(err, "misconfigured scaler")
 		return ctrl.Result{}, reconcile.TerminalError(err)
 	}
 
 	// TODO - log observation
-	log.Info("successful observation", observation)
+	log.Info("an observation was made", "observation", observation)
 
 	timeToNextTick := scaler.Spec.ReconciliationPeriod.Duration - time.Since(reconciliationStart)
 	return ctrl.Result{
