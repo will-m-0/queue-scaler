@@ -39,6 +39,8 @@ import (
 type MMcScalerReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	redis  *redis.Client
+	prom   *promq.Client
 }
 
 // +kubebuilder:rbac:groups=scaling.will-m-0.github.io,resources=mmcscalers,verbs=get;list;watch;create;update;patch;delete
