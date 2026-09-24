@@ -39,8 +39,8 @@ spec:
           spec:
             description: spec defines the desired state of MMcScaler
             properties:
-              drainTime:
-                description: 'T_d: desired backlog drain time once new capacity lands.'
+              arrivalsKey:
+                description: Redis arrivals key
                 type: string
               dryRun:
                 default: false
@@ -56,8 +56,13 @@ spec:
                 type: integer
               prometheusAddress:
                 type: string
+              prometheusSmoothingWindow:
+                type: string
               queueKey:
                 description: Redis list key
+                type: string
+              reconciliationPeriod:
+                description: interval between reconciliations
                 type: string
               redisAddress:
                 type: string
@@ -89,11 +94,13 @@ spec:
                 format: int32
                 type: integer
             required:
-            - drainTime
+            - arrivalsKey
             - maxReplicas
             - minReplicas
             - prometheusAddress
+            - prometheusSmoothingWindow
             - queueKey
+            - reconciliationPeriod
             - redisAddress
             - targetRef
             - targetUtilizationMilli

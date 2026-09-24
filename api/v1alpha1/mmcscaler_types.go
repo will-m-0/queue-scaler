@@ -48,10 +48,6 @@ type MMcScalerSpec struct {
 	// +kubebuilder:default=700
 	TargetUtilizationMilli int32 `json:"targetUtilizationMilli"`
 
-	// T_d: desired backlog drain time once new capacity lands.
-	// +kubebuilder:validation:Required
-	DrainTime metav1.Duration `json:"drainTime"`
-
 	// +kubebuilder:validation:Required
 	RedisAddress string `json:"redisAddress"`
 
@@ -74,7 +70,7 @@ type MMcScalerSpec struct {
 	DryRun bool `json:"dryRun,omitempty"`
 
 	// interval between reconciliations
-	ReconciliationPeriod int32 `json:"reconciliationPeriod"`
+	ReconciliationPeriod metav1.Duration `json:"reconciliationPeriod"`
 }
 
 // MMcScalerStatus defines the observed state of MMcScaler.

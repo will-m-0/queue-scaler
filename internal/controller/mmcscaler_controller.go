@@ -86,7 +86,7 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if apierrors.IsNotFound(err) {
 			// cannot find deployment - wait for next reconciliation cycle
 			log.Info("target deployment not found", "name", key.Name)
-			timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriod)*time.Second - time.Since(reconciliationStart)
+			timeToNextTick := scaler.Spec.ReconciliationPeriod.Duration - time.Since(reconciliationStart)
 			return ctrl.Result{
 				RequeueAfter: timeToNextTick,
 			}, nil
@@ -112,9 +112,9 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				"have", r.prom.Addr(), "want", scaler.Spec.PrometheusAddress)
 		}
 		promClient, err := promq.New(scaler.Spec.PrometheusAddress, promQueryTimeout)
-	if err != nil {
+		if err != nil {
 			// if failed to make prom client, config issue so on point retrying
-		log.Error(err, "Failed to create prometheus client")
+			log.Error(err, "Failed to create prometheus client")
 			return ctrl.Result{}, reconcile.TerminalError(fmt.Errorf("prometheus client: %w", err))
 		}
 		r.prom = promClient
@@ -125,7 +125,7 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	switch status {
 	case obsIncomplete:
 		// update status, and requeue without making scaling decision
-		timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriod)*time.Second - time.Since(reconciliationStart)
+		timeToNextTick := scaler.Spec.ReconciliationPeriod.Duration - time.Since(reconciliationStart)
 		return ctrl.Result{
 			RequeueAfter: timeToNextTick,
 		}, nil
@@ -137,7 +137,7 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// TODO - log observation
 	log.Info("successful observation", observation)
 
-	timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriod)*time.Second - time.Since(reconciliationStart)
+	timeToNextTick := scaler.Spec.ReconciliationPeriod.Duration - time.Since(reconciliationStart)
 	return ctrl.Result{
 		RequeueAfter: timeToNextTick,
 	}, nil
