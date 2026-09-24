@@ -86,7 +86,7 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if apierrors.IsNotFound(err) {
 			// cannot find deployment - wait for next reconciliation cycle
 			log.Info("target deployment not found", "name", key.Name)
-			timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriodMilli)*time.Millisecond - time.Since(reconciliationStart)
+			timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriod)*time.Second - time.Since(reconciliationStart)
 			return ctrl.Result{
 				RequeueAfter: timeToNextTick,
 			}, nil
@@ -120,43 +120,24 @@ func (r *MMcScalerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		r.prom = promClient
 	}
 
-	const serviceTimeQuery = "sum(rate(load_target_job_service_seconds_sum[5m])) / sum(rate(load_target_job_service_seconds_count[5m]))"
-	avgServiceTime, err := r.prom.QueryScalar(ctx, serviceTimeQuery, reconciliationStart)
-	switch classifyObservation(err) {
-	// TODO - meta SetStatusConditions
-	case obsMisconfigured:
-		return ctrl.Result{}, reconcile.TerminalError(err)
+	observer := r.observerFor(scaler)
+	observation, status, err := observer.observe(ctx, deploy, reconciliationStart)
+	switch status {
 	case obsIncomplete:
-		timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriodMilli)*time.Millisecond - time.Since(reconciliationStart)
+		// update status, and requeue without making scaling decision
+		timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriod)*time.Second - time.Since(reconciliationStart)
 		return ctrl.Result{
 			RequeueAfter: timeToNextTick,
 		}, nil
-	}
-	log.Info(fmt.Sprintf("Last 5 minute avg service time: %v", avgServiceTime))
-
-	const avgActiveWorkersQuery = "sum(rate(load_target_job_service_seconds_sum[5m]))"
-	avgActiveWorkers, err := r.prom.QueryScalar(ctx, avgActiveWorkersQuery, reconciliationStart)
-	switch classifyObservation(err) {
-	// TODO - meta SetStatusConditions
 	case obsMisconfigured:
+		// spec or image misconfigured, so reconcile will not succeed until image or spec change
 		return ctrl.Result{}, reconcile.TerminalError(err)
-	case obsIncomplete:
-		timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriodMilli)*time.Millisecond - time.Since(reconciliationStart)
-		return ctrl.Result{
-			RequeueAfter: timeToNextTick,
-		}, nil
 	}
-	log.Info(fmt.Sprintf("Last 5 minute avg active workers time: %v", avgActiveWorkers))
 
-	// read queue length from redis
-	queue_length, err := r.redis.LLen(ctx, scaler.Spec.QueueKey).Result()
-	if err != nil {
-		log.Info("Failed to get queue length from redis", "returned error: ", err)
-		return ctrl.Result{}, err
-	}
-	log.Info("current redis qeueue length", "queue_length", queue_length)
+	// TODO - log observation
+	log.Info("successful observation", observation)
 
-	timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriodMilli)*time.Millisecond - time.Since(reconciliationStart)
+	timeToNextTick := time.Duration(scaler.Spec.ReconciliationPeriod)*time.Second - time.Since(reconciliationStart)
 	return ctrl.Result{
 		RequeueAfter: timeToNextTick,
 	}, nil

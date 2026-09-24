@@ -59,15 +59,22 @@ type MMcScalerSpec struct {
 	// +kubebuilder:validation:Required
 	QueueKey string `json:"queueKey"`
 
+	// Redis arrivals key
+	// +kubebuilder:validation:Required
+	ArrivalsKey string `json:"arrivalsKey"`
+
 	// +kubebuilder:validation:Required
 	PrometheusAddress string `json:"prometheusAddress"`
+
+	// +kubebuilder:validation:Required
+	PrometheusSmoothingWindow metav1.Duration `json:"prometheusSmoothingWindow"`
 
 	// compute and record decisions without writing replicas
 	// +kubebuilder:default=false
 	DryRun bool `json:"dryRun,omitempty"`
 
 	// interval between reconciliations
-	ReconciliationPeriodMilli int32 `json:"reconciliationPeriodMilli"`
+	ReconciliationPeriod int32 `json:"reconciliationPeriod"`
 }
 
 // MMcScalerStatus defines the observed state of MMcScaler.
