@@ -93,11 +93,12 @@ func (o *observer) observe(ctx context.Context, deploy appsv1.Deployment, ts tim
 	}
 
 	return &observation{
-		At:          ts,
-		QueueLength: queueDepth,
-		Workers:     deploy.Status.ReadyReplicas * o.scaler.Spec.WorkersPerPod,
-		ServiceRate: 1 / avgServiceSeconds,
-		ArrivalRate: avgArrivalRate,
+		At:            ts,
+		QueueLength:   queueDepth,
+		TotalArrivals: totalArrivals,
+		Workers:       deploy.Status.ReadyReplicas * o.scaler.Spec.WorkersPerPod,
+		ServiceRate:   1 / avgServiceSeconds,
+		ArrivalRate:   avgArrivalRate,
 	}, obsOK, nil
 }
 
